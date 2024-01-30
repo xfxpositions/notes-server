@@ -19,7 +19,7 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
     var chunks_n: u16 = 1; // How many chunks are allocated
 
     // Declare buffer for read
-    const buffer = try allocator.alloc(u8, chunk_size);
+    var buffer = try allocator.alloc(u8, chunk_size);
     defer allocator.free(buffer);
 
     //Read with chunks
@@ -31,13 +31,14 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
 
         // Extend buffer size
         chunks_n += 1;
-        _ = try allocator.realloc(buffer, chunk_size * chunks_n);
+        buffer = try allocator.realloc(buffer, chunk_size * chunks_n);
 
         if (bytes_read < buffer.len) {
             break; // All bytes read
         }
     }
     std.debug.print("got out\n", .{});
+    std.debug.print("the read buffer is \n{s}\n", .{buffer[0..]});
 }
 
 pub fn main() !void {

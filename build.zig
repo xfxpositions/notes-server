@@ -5,6 +5,11 @@ pub fn build(b: *std.Build) void {
 
     const optimize = b.standardOptimizeOption(.{});
 
+    const string = b.dependency("string", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "notes-server",
         .root_source_file = .{ .path = "src/main.zig" },
@@ -12,7 +17,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    exe.addModule("string", string.module("string"));
+
     b.installArtifact(exe);
+
+    exe.linkLibrary(string.artifact("string"));
 
     const run_cmd = b.addRunArtifact(exe);
 
