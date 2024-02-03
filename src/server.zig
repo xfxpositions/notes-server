@@ -14,9 +14,7 @@ fn handle_connection_wrapper(connection: std.net.StreamServer.Connection, alloca
     };
 }
 
-fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std.mem.Allocator) !void {
-    std.debug.print("{any}\n", .{connection.address});
-
+fn read_stream_to_buffer(stream: std.net.Stream, allocator: std.mem.Allocator) ![]u8 {
     const chunk_size: usize = 256;
     var chunk_count: u16 = 1; // How many chunks are allocated
     var total_read: usize = 0;
@@ -24,11 +22,10 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
 
     // allocate buffer for read
     var buffer = try allocator.alloc(u8, chunk_size);
-    defer allocator.free(buffer);
 
     //Read with chunks
     while (true) {
-        bytes_read = try connection.stream.read(buffer[total_read..]);
+        bytes_read = try stream.read(buffer[total_read..]);
         if (bytes_read == 0) {
             break; // End of the stream
         }
@@ -51,6 +48,10 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
     std.debug.print("the read buffer is \n{s}\n", .{buffer[0..]});
     std.debug.print("total chunks read: {}\n", .{chunk_count});
 
+    return buffer;
+}
+
+fn parse_request_buffer(buffer: []const u8, allocator: std.mem.Allocator) !Request {
     // Split the request
     var parts = std.mem.splitAny(u8, buffer, "\r\n\r\n");
     var head = parts.first();
@@ -94,7 +95,54 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
     const body = parts.next().?;
 
     const request: Request = Request{ .method = method, .path = path, .http_version = http_version, .headers = headers, .body = body };
+
+    return request;
+}
+
+fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std.mem.Allocator) !void {
+    std.debug.print("new request from: {any}\n", .{connection.address});
+
+    var buffer = try read_stream_to_buffer(connection.stream, allocator);
+    defer allocator.free(buffer);
+
+    var request = try parse_request_buffer(buffer, allocator);
+
     std.debug.print("request: {any}\n", .{request});
+
+    var http_response = try allocator.alloc(u8, 0);
+    var render_data = std.StringHashMap([]const u8).init(allocator);
+
+    if (std.mem.eql(u8, request.path, "/secret") and std.mem.eql(u8, request.method, "GET")) {
+        const secret_text = try util.read_file("./notes/secret.txt", allocator);
+        _ = try render_data.put("annen", "yunus");
+        _ = try render_data.put("secret", secret_text);
+
+        var response_body = try util.render_template("./templates/index.html", allocator, render_data);
+
+        const response_head = try std.fmt.allocPrint(
+            allocator,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n",
+            .{response_body.len},
+        );
+
+        _ = try util.concatStrings(allocator, &http_response, response_head);
+        _ = try util.concatStrings(allocator, &http_response, response_body);
+
+        std.debug.print("{s}\n", .{http_response});
+    } else {
+        var response_body = try util.render_template("./templates/404.html", allocator, render_data);
+
+        const response_head = try std.fmt.allocPrint(
+            allocator,
+            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n",
+            .{response_body.len},
+        );
+
+        _ = try util.concatStrings(allocator, &http_response, response_head);
+        _ = try util.concatStrings(allocator, &http_response, response_body);
+    }
+    _ = try connection.stream.write(http_response);
+    std.debug.print("ALLAHIM GOOOL\n", .{});
 }
 
 pub fn main() !void {
