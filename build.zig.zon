@@ -4,30 +4,6 @@
     // In a future version of Zig it will be used for package deduplication.
     .version = "0.0.0",
 
-    // This field is optional.
-    // This is currently advisory only; Zig does not yet do anything
-    // with this value.
-    //.minimum_zig_version = "0.11.0",
-
-    // This field is optional.
-    // Each dependency must either provide a `url` and `hash`, or a `path`.
-    // `zig build --fetch` can be used to fetch all dependencies of a package, recursively.
-    // Once all dependencies are fetched, `zig build` no longer requires
-    // internet connectivity.
-    .dependencies = .{
-        .string = .{
-            .url = "https://github.com/JakubSzark/zig-string/archive/refs/heads/master.tar.gz",
-            .hash = "12204b96e7784827733899c43cc33fc8ff8e8476badb581a0efb2d06e34c4efaca56",
-            //the correct hash will be suggested by zig
-        },
-    },
-
-    // Specifies the set of files and directories that are included in this package.
-    // Only files and directories listed here are included in the `hash` that
-    // is computed for this package.
-    // Paths are relative to the build root. Use the empty string (`""`) to refer to
-    // the build root itself.
-    // A directory listed here means that all files within, recursively, are included.
     .paths = .{
         // This makes *all* files, recursively, included in this package. It is generally
         // better to explicitly list the files and directories instead, to insure that

@@ -18,7 +18,7 @@ fn len_hashmap_contents(hashmap: std.StringHashMap([]const u8)) u64 {
     return total;
 }
 
-pub fn concatStrings(allocator: std.mem.Allocator, dest: *[]u8, src: []const u8) !void {
+pub fn concat_strings(allocator: std.mem.Allocator, dest: *[]u8, src: []const u8) !void {
     const old_len = dest.len;
     const new_len = old_len + src.len;
     dest.* = try allocator.realloc(dest.*, new_len);
@@ -61,6 +61,13 @@ pub fn is_file_exist(file_path: []const u8) !bool {
     return true;
 }
 
+pub fn delete_file_contents(file_path: []const u8) !void {
+    const file = try std.fs.cwd().openFile(file_path, .{ .mode = std.fs.File.OpenMode.write_only });
+    defer file.close();
+
+    _ = try file.setEndPos(0);
+}
+
 /// Writes whole buffer to file, creates file if it not exists
 pub fn write_buffer_to_file(
     file_path: []const u8,
@@ -91,7 +98,7 @@ pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data
 
     var buffer = try allocator.alloc(u8, 0);
 
-    _ = try concatStrings(allocator, &buffer, script_head);
+    _ = try concat_strings(allocator, &buffer, script_head);
 
     // Append data to script
     var it = data.iterator();
@@ -103,11 +110,55 @@ pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data
             .{ entry.key_ptr.*, entry.value_ptr.* },
         );
 
-        _ = try concatStrings(allocator, &buffer, js_str);
+        _ = try concat_strings(allocator, &buffer, js_str);
     }
 
-    _ = try concatStrings(allocator, &buffer, script_end);
-    _ = try concatStrings(allocator, &buffer, html_string);
+    _ = try concat_strings(allocator, &buffer, script_end);
+    _ = try concat_strings(allocator, &buffer, html_string);
 
     return buffer;
 }
+
+const DbData = struct { clicks: ?u32 };
+
+const JsonDb = struct {
+    path: []const u8,
+    allocator: std.mem.Allocator,
+    data: std.json.Parsed(DbData),
+
+    fn init(path: []const u8, allocator: std.mem.Allocator) !*JsonDb {
+        var self = try allocator.create(JsonDb);
+        self.allocator = allocator;
+        self.path = path;
+
+        // If db file doesn't exist, create the database file
+        if (try is_file_exist(self.path) == false) {
+            _ = try std.fs.cwd().createFile(self.path, std.fs.File.CreateFlags{ .truncate = true });
+            _ = try write_buffer_to_file(self.path, "{}");
+        }
+
+        self.data = try read_db(self);
+        return self;
+    }
+    pub fn deinit(self: *JsonDb) void {
+        self.data.deinit();
+        self.allocator.destroy(self);
+    }
+    fn read_db(self: *JsonDb) !std.json.Parsed(DbData) {
+        const data = try read_file(self.path, self.allocator);
+        defer self.allocator.free(data);
+
+        return try std.json.parseFromSlice(DbData, self.allocator, data, .{ .allocate = .alloc_always });
+    }
+    fn write_db(self: *JsonDb) !void {
+        // Clean the file before write
+        _ = try delete_file_contents(self.path);
+
+        var file = try std.fs.cwd().openFile(self.path, .{ .mode = std.fs.File.OpenMode.write_only });
+        defer file.close();
+
+        // const stringify_options: std.json.StringifyOptions = undefined;
+        _ = try std.json.stringify(self.data.value, .{}, file.writer());
+        std.debug.print("db written to: {s}\n", .{self.path});
+    }
+};

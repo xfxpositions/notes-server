@@ -125,8 +125,8 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
             .{response_body.len},
         );
 
-        _ = try util.concatStrings(allocator, &http_response, response_head);
-        _ = try util.concatStrings(allocator, &http_response, response_body);
+        _ = try util.concat_strings(allocator, &http_response, response_head);
+        _ = try util.concat_strings(allocator, &http_response, response_body);
 
         std.debug.print("{s}\n", .{http_response});
     } else {
@@ -138,11 +138,14 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
             .{response_body.len},
         );
 
-        _ = try util.concatStrings(allocator, &http_response, response_head);
-        _ = try util.concatStrings(allocator, &http_response, response_body);
+        _ = try util.concat_strings(allocator, &http_response, response_head);
+        _ = try util.concat_strings(allocator, &http_response, response_body);
     }
     _ = try connection.stream.write(http_response);
     std.debug.print("ALLAHIM GOOOL\n", .{});
+
+    // Close the stream
+    connection.stream.close();
 }
 
 pub fn main() !void {
