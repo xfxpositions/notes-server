@@ -7,7 +7,7 @@ pub fn getFileSize(file_path: []const u8) !u64 {
     return stats.size;
 }
 
-fn len_hashmap_contents(hashmap: std.StringHashMap([]const u8)) u64 {
+pub fn len_hashmap_contents(hashmap: std.StringHashMap([]const u8)) u64 {
     var total: u64 = 0;
     var it = hashmap.iterator();
 
@@ -34,7 +34,7 @@ pub fn read_file(file_path: []const u8, allocator: std.mem.Allocator) ![]u8 {
     const file_size = try getFileSize(file_path);
 
     // Alloc the buffer
-    var buffer = try allocator.alloc(u8, file_size);
+    const buffer = try allocator.alloc(u8, file_size);
 
     // Check if file exist
     if (try is_file_exist(file_path) == false) {
@@ -88,7 +88,7 @@ pub fn write_buffer_to_file(
 }
 
 pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data: std.StringHashMap([]const u8)) ![]const u8 {
-    var html_string = try read_file(file_path, allocator);
+    const html_string = try read_file(file_path, allocator);
 
     const script_head = "<script>\n";
     const script_end = "</script>\n";
@@ -106,7 +106,7 @@ pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data
     while (it.next()) |entry| {
         const js_str = try std.fmt.allocPrint(
             allocator,
-            "var {s} = '{s}';\n",
+            "let {s} = `{s}`;\n",
             .{ entry.key_ptr.*, entry.value_ptr.* },
         );
 
@@ -119,22 +119,23 @@ pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data
     return buffer;
 }
 
-const DbData = struct { clicks: ?u32 };
+pub const DbData = struct { clicks: ?u32 };
 
-const JsonDb = struct {
+pub const JsonDb = struct {
     path: []const u8,
     allocator: std.mem.Allocator,
     data: std.json.Parsed(DbData),
 
-    fn init(path: []const u8, allocator: std.mem.Allocator) !*JsonDb {
+    pub fn init(path: []const u8, allocator: std.mem.Allocator) !*JsonDb {
         var self = try allocator.create(JsonDb);
         self.allocator = allocator;
         self.path = path;
 
         // If db file doesn't exist, create the database file
         if (try is_file_exist(self.path) == false) {
-            _ = try std.fs.cwd().createFile(self.path, std.fs.File.CreateFlags{ .truncate = true });
-            _ = try write_buffer_to_file(self.path, "{}");
+            // _ = try std.fs.cwd().createFile(self.path, std.fs.File.CreateFlags{ .truncate = true });
+            // _ = try write_buffer_to_file(self.path, "{}");
+            _ = try self.write_db();
         }
 
         self.data = try read_db(self);
@@ -144,13 +145,13 @@ const JsonDb = struct {
         self.data.deinit();
         self.allocator.destroy(self);
     }
-    fn read_db(self: *JsonDb) !std.json.Parsed(DbData) {
+    pub fn read_db(self: *JsonDb) !std.json.Parsed(DbData) {
         const data = try read_file(self.path, self.allocator);
         defer self.allocator.free(data);
 
         return try std.json.parseFromSlice(DbData, self.allocator, data, .{ .allocate = .alloc_always });
     }
-    fn write_db(self: *JsonDb) !void {
+    pub fn write_db(self: *JsonDb) !void {
         // Clean the file before write
         _ = try delete_file_contents(self.path);
 

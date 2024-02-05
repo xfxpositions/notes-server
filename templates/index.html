@@ -10,10 +10,14 @@
     <code id="secrettext"></code>
   </body>
   <script>
-    const tosuntext = document.getElementById("tosun");
-    const secretext = document.getElementById("secret");
+    window.onload = function(){
+      const tosuntext = document.getElementById("tosun");
+      const secretext = document.getElementById("secret");
 
-    tosuntext.innerText = annen;
-    secrettext.innerText = secret;
+      console.log(annen);
+      tosuntext.innerText = annen;
+      secrettext.innerText = secret;
+    }
+    
   </script>
 </html>

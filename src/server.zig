@@ -1,7 +1,33 @@
 const std = @import("std");
 const util = @import("utils.zig");
 
-const Request = struct { method: []const u8, path: []const u8, http_version: []const u8, headers: std.StringHashMap(?[]const u8), body: []const u8 };
+const HttpObject = struct {
+    // Common HttpObject fields
+    http_version: []const u8,
+    headers: std.StringHashMap(?[]const u8),
+    body: []const u8,
+
+    // Request-specific Fields
+    method: ?[]const u8,
+    path: ?[]const u8,
+
+    // Response-specific Fields
+    status_code: ?[]const u8,
+    reason_phrase: ?[]const u8,
+
+    pub fn init(allocator: std.mem.Allocator) HttpObject {
+        return HttpObject{
+            .method = null,
+            .path = null,
+            .http_version = "HTTP/1.1",
+            .headers = std.StringHashMap(?[]const u8).init(allocator),
+            .body = "<h1>Halo</h1>",
+            .status_code = null,
+            .reason_phrase = null,
+        };
+    }
+};
+const Route = struct { method: []const u8, path: []const u8 };
 
 // Listen in local adress and 4000
 // Use 0,0,0,0 for public adress
@@ -51,21 +77,21 @@ fn read_stream_to_buffer(stream: std.net.Stream, allocator: std.mem.Allocator) !
     return buffer;
 }
 
-fn parse_request_buffer(buffer: []const u8, allocator: std.mem.Allocator) !Request {
+fn parse_request_buffer(buffer: []const u8, allocator: std.mem.Allocator) !HttpObject {
     // Split the request
     var parts = std.mem.splitAny(u8, buffer, "\r\n\r\n");
-    var head = parts.first();
+    const head = parts.first();
 
     // Split head into status line and headers
     var head_parts = std.mem.splitAny(u8, head, "\r\n");
 
     // Parse status line
-    var status_line = head_parts.first();
+    const status_line = head_parts.first();
     var status_line_parts = std.mem.splitScalar(u8, status_line, ' ');
 
     const method = status_line_parts.first();
-    const path = status_line_parts.next().?;
-    const http_version = status_line_parts.next().?;
+    const path = status_line_parts.next() orelse "";
+    const http_version = status_line_parts.next() orelse "";
 
     // Parse raw headers to hashmap
     var headers_lines: std.mem.SplitIterator(u8, std.mem.DelimiterType.scalar) = undefined;
@@ -84,7 +110,7 @@ fn parse_request_buffer(buffer: []const u8, allocator: std.mem.Allocator) !Reque
             break; // Exit if end of lines
         }
 
-        var line_parts = std.mem.splitScalar(u8, line.?, ':');
+        var line_parts = std.mem.splitScalar(u8, line orelse "", ':');
         const key = line_parts.first();
         const value: []const u8 = line_parts.next() orelse "";
 
@@ -92,32 +118,62 @@ fn parse_request_buffer(buffer: []const u8, allocator: std.mem.Allocator) !Reque
     }
 
     // Parse body
-    const body = parts.next().?;
+    const body = parts.next() orelse "";
 
-    const request: Request = Request{ .method = method, .path = path, .http_version = http_version, .headers = headers, .body = body };
+    const request: HttpObject = HttpObject{ .method = method, .path = path, .http_version = http_version, .headers = headers, .body = body, .reason_phrase = null, .status_code = null };
 
     return request;
+}
+
+// const len = response.body.len + util.len_hashmap_contents(response.headers) + response.http_version.len + response.status_code.?.len + response.reason_phrase.?.len;
+// var buffer = try allocator.alloc(u8, len);
+
+fn pack_response(response: HttpObject, allocator: std.mem.Allocator) ![]u8 {
+    // Ensure we have a status code and reason phrase for the response
+    if (response.status_code == null or response.reason_phrase == null) {
+        return error.MissingResponseStatus;
+    }
+
+    var buffer = try std.fmt.allocPrint(allocator, "{s} {s} {s}\r\n", .{ response.http_version, response.status_code.?, response.reason_phrase.? });
+
+    // Set Content-Length if it was not setted
+    if (response.headers.get("Content-Length") == null) {
+        _ = try response.headers.put("Content-Length", response.body.len);
+    }
+
+    // append headers
+    var it = response.headers.iterator();
+    while (it.next()) |entry| {
+        const key = entry.key_ptr.*;
+        const value = entry.value_ptr.* orelse "";
+        buffer = try std.fmt.allocPrint(allocator, "{s}{s}: {s}\r\n", .{ buffer, key, value });
+    }
+
+    // Append body
+    buffer = try std.fmt.allocPrint(allocator, "\r\n\r\n{s}{s}", .{ buffer, response.body });
+
+    return buffer;
 }
 
 fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std.mem.Allocator) !void {
     std.debug.print("new request from: {any}\n", .{connection.address});
 
-    var buffer = try read_stream_to_buffer(connection.stream, allocator);
+    const buffer = try read_stream_to_buffer(connection.stream, allocator);
     defer allocator.free(buffer);
 
-    var request = try parse_request_buffer(buffer, allocator);
+    const request = try parse_request_buffer(buffer, allocator);
 
     std.debug.print("request: {any}\n", .{request});
 
     var http_response = try allocator.alloc(u8, 0);
     var render_data = std.StringHashMap([]const u8).init(allocator);
 
-    if (std.mem.eql(u8, request.path, "/secret") and std.mem.eql(u8, request.method, "GET")) {
+    if (std.mem.eql(u8, request.path.?, "/secret") and request.method != null and std.mem.eql(u8, request.method.?, "GET")) {
         const secret_text = try util.read_file("./notes/secret.txt", allocator);
         _ = try render_data.put("annen", "yunus");
         _ = try render_data.put("secret", secret_text);
 
-        var response_body = try util.render_template("./templates/index.html", allocator, render_data);
+        const response_body = try util.render_template("./templates/index.html", allocator, render_data);
 
         const response_head = try std.fmt.allocPrint(
             allocator,
@@ -130,17 +186,31 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
 
         std.debug.print("{s}\n", .{http_response});
     } else {
-        var response_body = try util.render_template("./templates/404.html", allocator, render_data);
+        var response = HttpObject.init(allocator);
+        response.status_code = "200";
+        response.reason_phrase = "OK";
+        response.body = "<html><h1>Halo</h1></html>";
+        _ = try response.headers.put("Content-Type", "text/html");
 
-        const response_head = try std.fmt.allocPrint(
-            allocator,
-            "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n",
-            .{response_body.len},
-        );
+        const response_string = try pack_response(response, allocator);
 
-        _ = try util.concat_strings(allocator, &http_response, response_head);
-        _ = try util.concat_strings(allocator, &http_response, response_body);
+        std.debug.print("response string: {s}\n", .{response_string});
+
+        _ = try connection.stream.writeAll(response_string);
     }
+    // } else {
+    //     const response_body = try util.render_template("./templates/404.html", allocator, render_data);
+
+    //     const response_head = try std.fmt.allocPrint(
+    //         allocator,
+    //         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n",
+    //         .{response_body.len},
+    //     );
+
+    //     _ = try util.concat_strings(allocator, &http_response, response_head);
+    //     _ = try util.concat_strings(allocator, &http_response, response_body);
+    // }
+
     _ = try connection.stream.write(http_response);
     std.debug.print("ALLAHIM GOOOL\n", .{});
 
@@ -177,6 +247,8 @@ pub fn main() !void {
             std.debug.print("Some error happened while accepting the connection {any}\n", .{err});
             return;
         };
-        _ = try pool.spawn(handle_connection_wrapper, .{ connection, allocator });
+        _ = pool.spawn(handle_connection_wrapper, .{ connection, allocator }) catch |err| {
+            std.debug.print("an error happened in thread: {any}\n", .{err});
+        };
     }
 }
