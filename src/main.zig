@@ -5,7 +5,7 @@ const JsonDb = utils.JsonDb;
 pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, comptime data: anytype) ![]const u8 {
     _ = data;
 
-    const html_string = try utils.read_file(file_path, allocator);
+    var html_string = try utils.read_file(file_path, allocator);
     defer allocator.free(html_string);
 
     var buffer = try allocator.alloc(u8, 0);
@@ -58,19 +58,17 @@ pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, comp
         _ = try utils.concat_strings(allocator, &first_part, "variable_value");
 
         // Delete variable name from second part
-        second_part = try utils.remove_first_n_chars(buffer, variable_name.len, allocator);
-        defer allocator.free(second_part);
+        const second_part_deleted = try utils.chop_n(&first_part, 3, allocator);
+        defer allocator.free(second_part_deleted);
 
-        // html_string = try utils.concat_strings(allocator, &first_part, second_part);
-
-        // @memcpy(html_string[start + 2 .. end - 2], "variable_value");
+        _ = try utils.concat_strings(allocator, &first_part, second_part_deleted);
 
         variable_count += 1;
 
         _ = try variable_names.append(variable_name);
 
         std.debug.print("first part: {s}\n", .{first_part});
-        std.debug.print("second part: {s}\n", .{first_part});
+        std.debug.print("first part: {s}\n", .{second_part_deleted});
 
         std.debug.print("---------------------\n", .{});
     }
