@@ -43,16 +43,34 @@ pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, comp
 
         // Change variable name as value
         // Split html to 2 first
-        var first_part = html_string[0..start];
-        var second_part = html_string[start];
+        var first_part = try allocator.alloc(u8, html_string[0..start].len);
+        var second_part = try allocator.alloc(u8, html_string[start..].len);
+        defer allocator.free(first_part);
+        defer allocator.free(second_part);
 
+        @memcpy(second_part[0..], html_string[start..]);
+        @memcpy(first_part[0..], html_string[0..start]);
+
+        std.debug.print("first part: {s}\n", .{first_part});
+        std.debug.print("second part: {s}\n", .{first_part});
+
+        // Append variable value to first part
         _ = try utils.concat_strings(allocator, &first_part, "variable_value");
 
-        @memcpy(html_string[start + 2 .. end - 2], "variable_value");
+        // Delete variable name from second part
+        second_part = try utils.remove_first_n_chars(buffer, variable_name.len, allocator);
+        defer allocator.free(second_part);
+
+        // html_string = try utils.concat_strings(allocator, &first_part, second_part);
+
+        // @memcpy(html_string[start + 2 .. end - 2], "variable_value");
 
         variable_count += 1;
 
         _ = try variable_names.append(variable_name);
+
+        std.debug.print("first part: {s}\n", .{first_part});
+        std.debug.print("second part: {s}\n", .{first_part});
 
         std.debug.print("---------------------\n", .{});
     }
@@ -78,7 +96,7 @@ pub fn main() !void {
     const html_string = try render_template("./templates/test.html", allocator, null);
     defer allocator.free(html_string);
 
-    // std.time.sleep(10 * std.time.ns_per_ms);
+    std.time.sleep(10 * std.time.ns_per_ms);
 
     const end_time = std.time.milliTimestamp();
 

@@ -112,6 +112,24 @@ pub fn list_dir_contents(path: []const u8, allocator: std.mem.Allocator) !std.Ar
     return list;
 }
 
+pub fn remove_first_n_chars(str: []const u8, n: usize, allocator: std.mem.Allocator) ![]u8 {
+    if (n >= str.len) {
+        // If n is greater than or equal to the length of the string, return an empty string
+        return allocator.alloc(u8, 0);
+    } else {
+        const new_len = str.len - n;
+
+        // Allocate memory for the new string
+        var new_str = try allocator.alloc(u8, new_len);
+        // Copy the remaining part of the original string into the new string
+        @memcpy(new_str, str[n..]);
+
+        defer allocator.free(str);
+
+        return new_str;
+    }
+}
+
 pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data: ?std.StringHashMap([]const u8)) ![]const u8 {
     const html_string = try read_file(file_path, allocator);
 
