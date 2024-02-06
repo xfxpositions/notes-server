@@ -1,5 +1,6 @@
 const std = @import("std");
 const util = @import("utils.zig");
+const config = @import("config.zig");
 
 const HttpObject = struct {
     // Common HttpObject fields
@@ -128,7 +129,7 @@ fn parse_request_buffer(buffer: []const u8, allocator: std.mem.Allocator) !HttpO
 // const len = response.body.len + util.len_hashmap_contents(response.headers) + response.http_version.len + response.status_code.?.len + response.reason_phrase.?.len;
 // var buffer = try allocator.alloc(u8, len);
 
-fn pack_response(response: HttpObject, allocator: std.mem.Allocator) ![]u8 {
+fn pack_response(response: *HttpObject, allocator: std.mem.Allocator) ![]u8 {
     // Ensure we have a status code and reason phrase for the response
     if (response.status_code == null or response.reason_phrase == null) {
         return error.MissingResponseStatus;
@@ -138,7 +139,10 @@ fn pack_response(response: HttpObject, allocator: std.mem.Allocator) ![]u8 {
 
     // Set Content-Length if it was not setted
     if (response.headers.get("Content-Length") == null) {
-        _ = try response.headers.put("Content-Length", response.body.len);
+        const size = @as(usize, @intCast(std.fmt.count("{d}", .{response.body.len})));
+        const buf = try allocator.alloc(u8, size);
+        _ = try std.fmt.bufPrint(buf, "{d}", .{response.body.len});
+        try response.headers.put("Content-Length", buf);
     }
 
     // append headers
@@ -150,9 +154,17 @@ fn pack_response(response: HttpObject, allocator: std.mem.Allocator) ![]u8 {
     }
 
     // Append body
-    buffer = try std.fmt.allocPrint(allocator, "\r\n\r\n{s}{s}", .{ buffer, response.body });
+    buffer = try std.fmt.allocPrint(allocator, "{s}\r\n{s}", .{ buffer, response.body });
 
     return buffer;
+}
+
+fn handle_404(allocator: std.mem.Allocator) ![]const u8 {
+    _ = allocator;
+}
+
+fn handle_home(allocator: std.mem.Allocator) ![]const u8 {
+    _ = allocator;
 }
 
 fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std.mem.Allocator) !void {
@@ -168,7 +180,22 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
     var http_response = try allocator.alloc(u8, 0);
     var render_data = std.StringHashMap([]const u8).init(allocator);
 
-    if (std.mem.eql(u8, request.path.?, "/secret") and request.method != null and std.mem.eql(u8, request.method.?, "GET")) {
+    const path = request.path.?;
+    const method = request.method.?;
+
+    var response = HttpObject.init(allocator);
+
+    if (std.mem.eql(u8, path, "/") and std.mem.eql(u8, method, "GET")) {
+        response.body = try util.render_template("./index.html", allocator, null);
+        response.headers.put("Content-Type", "text/html");
+        response.reason_phrase = "OK";
+        response.status_code = "200";
+
+        http_response = try pack_response(response, allocator);
+    } else if (std.mem.eql(u8, path, "/notes") and std.mem.eql(u8, method, "GET")) {
+        var entries = try util.list_dir_contents("./notes", allocator);
+        _ = entries;
+    } else if (std.mem.eql(u8, path, "/secret") and std.mem.eql(u8, method, "GET")) {
         const secret_text = try util.read_file("./notes/secret.txt", allocator);
         _ = try render_data.put("annen", "yunus");
         _ = try render_data.put("secret", secret_text);
@@ -186,30 +213,15 @@ fn handle_connection(connection: std.net.StreamServer.Connection, allocator: std
 
         std.debug.print("{s}\n", .{http_response});
     } else {
-        var response = HttpObject.init(allocator);
         response.status_code = "200";
         response.reason_phrase = "OK";
-        response.body = "<html><h1>Halo</h1></html>";
+        response.body = try util.render_template("./templates/404.html", allocator, null);
         _ = try response.headers.put("Content-Type", "text/html");
 
-        const response_string = try pack_response(response, allocator);
-
-        std.debug.print("response string: {s}\n", .{response_string});
-
-        _ = try connection.stream.writeAll(response_string);
+        http_response = try pack_response(&response, allocator);
     }
-    // } else {
-    //     const response_body = try util.render_template("./templates/404.html", allocator, render_data);
 
-    //     const response_head = try std.fmt.allocPrint(
-    //         allocator,
-    //         "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n",
-    //         .{response_body.len},
-    //     );
-
-    //     _ = try util.concat_strings(allocator, &http_response, response_head);
-    //     _ = try util.concat_strings(allocator, &http_response, response_body);
-    // }
+    std.debug.print("response string: {s}\n", .{http_response});
 
     _ = try connection.stream.write(http_response);
     std.debug.print("ALLAHIM GOOOL\n", .{});
