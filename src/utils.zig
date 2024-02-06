@@ -87,30 +87,54 @@ pub fn write_buffer_to_file(
     std.debug.print("Contents written to file {s}\n", .{file_path});
 }
 
-pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data: std.StringHashMap([]const u8)) ![]const u8 {
+pub const EntryInfo = struct {
+    name: []const u8,
+    is_dir: bool,
+};
+
+pub fn list_dir_contents(path: []const u8, allocator: std.mem.Allocator) !std.ArrayList(EntryInfo) {
+    var dir = try std.fs.cwd().openIterableDir(path, .{});
+    defer dir.close();
+
+    var list = std.ArrayList(EntryInfo).init(allocator);
+
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        const is_dir = entry.kind == std.fs.File.Kind.directory;
+
+        // Copy entry name
+        const name = try allocator.alloc(u8, entry.name.len);
+        @memcpy(name[0..entry.name.len], entry.name);
+
+        try list.append(EntryInfo{ .name = name, .is_dir = is_dir });
+    }
+
+    return list;
+}
+
+pub fn render_template(file_path: []const u8, allocator: std.mem.Allocator, data: ?std.StringHashMap([]const u8)) ![]const u8 {
     const html_string = try read_file(file_path, allocator);
 
     const script_head = "<script>\n";
     const script_end = "</script>\n";
 
-    const data_len = len_hashmap_contents(data);
-    _ = data_len;
-
     var buffer = try allocator.alloc(u8, 0);
 
     _ = try concat_strings(allocator, &buffer, script_head);
 
-    // Append data to script
-    var it = data.iterator();
+    if (data) |data_unwrapped| {
+        // Append data to script
+        var it = data_unwrapped.iterator();
 
-    while (it.next()) |entry| {
-        const js_str = try std.fmt.allocPrint(
-            allocator,
-            "let {s} = `{s}`;\n",
-            .{ entry.key_ptr.*, entry.value_ptr.* },
-        );
+        while (it.next()) |entry| {
+            const js_str = try std.fmt.allocPrint(
+                allocator,
+                "let {s} = `{s}`;\n",
+                .{ entry.key_ptr.*, entry.value_ptr.* },
+            );
 
-        _ = try concat_strings(allocator, &buffer, js_str);
+            _ = try concat_strings(allocator, &buffer, js_str);
+        }
     }
 
     _ = try concat_strings(allocator, &buffer, script_end);
